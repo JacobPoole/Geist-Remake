@@ -38,6 +38,15 @@ local function InCombat()
 	return InCombatLockdown()
 end
 
+-- The default border art is slightly larger than the button and anchored to
+-- its top-left, so it shows as a second line on the right and bottom edges.
+local function StripArt(b)
+	local normal = b.NormalTexture or b:GetNormalTexture()
+	if normal then normal:SetAlpha(0) end
+	if b.SlotBackground then b.SlotBackground:SetAlpha(0) end
+	if b.SlotArt then b.SlotArt:SetAlpha(0) end
+end
+
 ---------------------------------------------------------------------------
 -- Frames
 ---------------------------------------------------------------------------
@@ -68,9 +77,15 @@ local function CreateFrames()
 			b.HotKey:SetText("")
 			b.HotKey:Hide()
 		end
-		-- Remove the dark empty-slot fill so only the outline shows
-		if b.SlotBackground then b.SlotBackground:SetAlpha(0) end
-		if b.SlotArt then b.SlotArt:SetAlpha(0) end
+		-- Hide Blizzard's slot fill and border so only our outline shows. Blizzard
+		-- re-applies this art when a button updates, so strip it again after
+		-- every update.
+		StripArt(b)
+		for _, method in ipairs({ "Update", "UpdateButtonArt", "UpdateAction" }) do
+			if type(b[method]) == "function" then
+				hooksecurefunc(b, method, StripArt)
+			end
+		end
 		buttons[i] = b
 
 		-- Square outline drawn as four 1px edges
