@@ -4,7 +4,7 @@ A WoW Forever addon. While you hold a keybind, a 5x5 grid of action buttons appe
 
 ## Install
 
-Copy the `GeistRemake` folder (the one with `GeistRemake.toc` inside it) into:
+Copy the `Geist-Remake` folder (the one with `Geist-Remake.toc` inside it) into:
 
 ```
 World of Warcraft\_forever_\Interface\AddOns\
