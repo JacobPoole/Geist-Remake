@@ -22,8 +22,9 @@ BINDING_HEADER_GEISTREMAKE = "GeistRemake"
 _G["BINDING_NAME_CLICK GeistRemakeToggle:LeftButton"] = "Show Geist Grid (hold)"
 
 local db
-local anchor, grid, toggle
+local anchor, grid, toggle, outlineLayer
 local buttons = {}
+local outlines = {}
 
 local function Print(msg)
 	print("|cff66ccffGeistRemake|r: " .. msg)
@@ -51,10 +52,10 @@ local function CreateFrames()
 	grid:SetPoint("CENTER", anchor, "CENTER")
 	grid:Hide()
 
-	local bg = grid:CreateTexture(nil, "BACKGROUND")
-	bg:SetPoint("TOPLEFT", -4, 4)
-	bg:SetPoint("BOTTOMRIGHT", 4, -4)
-	bg:SetColorTexture(0, 0, 0, 0.45)
+	-- Outlines sit on their own layer above the buttons and ignore the mouse
+	outlineLayer = CreateFrame("Frame", nil, grid)
+	outlineLayer:SetAllPoints(grid)
+	outlineLayer:EnableMouse(false)
 
 	for i = 1, NUM_BUTTONS do
 		local b = CreateFrame("CheckButton", "GeistRemakeButton" .. i, grid, "ActionBarButtonTemplate")
@@ -63,8 +64,26 @@ local function CreateFrames()
 			b.HotKey:SetText("")
 			b.HotKey:Hide()
 		end
+		-- Remove the dark empty-slot fill so only the outline shows
+		if b.SlotBackground then b.SlotBackground:SetAlpha(0) end
+		if b.SlotArt then b.SlotArt:SetAlpha(0) end
 		buttons[i] = b
+
+		-- Square outline drawn as four 1px edges
+		local cell = CreateFrame("Frame", nil, outlineLayer)
+		local edges = {}
+		for e = 1, 4 do
+			local t = cell:CreateTexture(nil, "OVERLAY")
+			t:SetColorTexture(1, 1, 1, 0.6)
+			edges[e] = t
+		end
+		edges[1]:SetPoint("TOPLEFT"); edges[1]:SetPoint("TOPRIGHT"); edges[1]:SetHeight(1)
+		edges[2]:SetPoint("BOTTOMLEFT"); edges[2]:SetPoint("BOTTOMRIGHT"); edges[2]:SetHeight(1)
+		edges[3]:SetPoint("TOPLEFT"); edges[3]:SetPoint("BOTTOMLEFT"); edges[3]:SetWidth(1)
+		edges[4]:SetPoint("TOPRIGHT"); edges[4]:SetPoint("BOTTOMRIGHT"); edges[4]:SetWidth(1)
+		outlines[i] = cell
 	end
+	outlineLayer:SetFrameLevel(buttons[NUM_BUTTONS]:GetFrameLevel() + 5)
 
 	-- The button the keybind "clicks". It fires on key down AND key up.
 	toggle = CreateFrame("Button", "GeistRemakeToggle", UIParent, "SecureHandlerClickTemplate")
@@ -106,9 +125,23 @@ local function ApplySettings()
 	for i, b in ipairs(buttons) do
 		local row = math.floor((i - 1) / COLS)
 		local col = (i - 1) % COLS
+		local cx = col * (size + gap) + size / 2
+		local cy = -(row * (size + gap) + size / 2)
+
+		-- The Blizzard button art has a fixed size, so resizing the frame leaves the
+		-- icon small and stuck in the corner. Keep the native size and scale it
+		-- instead, centered in its square.
+		local native = b:GetWidth()
+		if not native or native <= 0 then native = 45 end
+		local s = size / native
+		b:SetScale(s)
 		b:ClearAllPoints()
-		b:SetSize(size, size)
-		b:SetPoint("TOPLEFT", grid, "TOPLEFT", col * (size + gap), -row * (size + gap))
+		b:SetPoint("CENTER", grid, "TOPLEFT", cx / s, cy / s)
+
+		local o = outlines[i]
+		o:ClearAllPoints()
+		o:SetSize(size, size)
+		o:SetPoint("CENTER", grid, "TOPLEFT", cx, cy)
 
 		b:SetAttribute("action", db.startSlot + i - 1)
 		if b.UpdateAction then
