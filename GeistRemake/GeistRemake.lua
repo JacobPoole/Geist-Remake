@@ -48,6 +48,70 @@ local function StripArt(b)
 end
 
 ---------------------------------------------------------------------------
+-- Cooldowns
+--
+-- In combat this client hides cooldown times from addons ("secret values").
+-- Blizzard's button code may only pass them to SetCooldown when it runs
+-- untainted, and on buttons an addon created it never is, so every cooldown
+-- update on the grid threw "Secret values are only allowed during untainted
+-- execution". We run Blizzard's handler protected so that can't error, then
+-- draw the cooldown ourselves in a way the client allows.
+---------------------------------------------------------------------------
+
+local function IsSecret(v)
+	return issecretvalue ~= nil and issecretvalue(v)
+end
+
+local function DrawCooldown(b)
+	local cd = b.cooldown
+	local slot = b.action or b:GetAttribute("action")
+	if not (cd and slot) then return end
+
+	-- Newer clients hand out a "duration object" that can carry hidden times
+	-- straight to a cooldown frame.
+	if C_ActionBar and C_ActionBar.GetActionCooldownDuration and cd.SetCooldownFromDurationObject then
+		local ok, duration = pcall(C_ActionBar.GetActionCooldownDuration, slot)
+		if ok and duration and pcall(cd.SetCooldownFromDurationObject, cd, duration) then
+			return
+		end
+	end
+
+	local start, duration, enable, modRate
+	if GetActionCooldown then
+		start, duration, enable, modRate = GetActionCooldown(slot)
+	elseif C_ActionBar and C_ActionBar.GetActionCooldown then
+		local info = C_ActionBar.GetActionCooldown(slot)
+		if type(info) == "table" then
+			start, duration, enable, modRate = info.startTime, info.duration, info.isEnabled, info.modRate
+		end
+	end
+	-- Hidden by the game: leave the cooldown as it was rather than error.
+	if start == nil or IsSecret(start) or IsSecret(duration) or IsSecret(enable) or IsSecret(modRate) then
+		return
+	end
+	if duration and duration > 0 and enable ~= false and enable ~= 0 then
+		cd:SetCooldown(start, duration, modRate or 1)
+	else
+		cd:Clear()
+	end
+end
+
+-- Blizzard's event dispatcher calls button:OnEvent for every action bar event.
+-- Only our own 25 buttons are changed; the default action bars are untouched.
+local function ProtectCooldowns(b)
+	local original = b.OnEvent
+	if type(original) ~= "function" then return end
+	local function OnEvent(self, event, ...)
+		pcall(original, self, event, ...)
+		DrawCooldown(self)
+	end
+	b.OnEvent = OnEvent
+	if b:GetScript("OnEvent") then
+		b:SetScript("OnEvent", OnEvent)
+	end
+end
+
+---------------------------------------------------------------------------
 -- Frames
 ---------------------------------------------------------------------------
 
@@ -86,6 +150,7 @@ local function CreateFrames()
 				hooksecurefunc(b, method, StripArt)
 			end
 		end
+		ProtectCooldowns(b)
 		buttons[i] = b
 
 		-- Square outline drawn as four 1px edges
