@@ -8,6 +8,10 @@
 local ADDON_NAME = ...
 
 local ROWS, COLS = 5, 5
+
+-- Square outline color (soft gray) and opacity (0 = invisible, 1 = solid)
+local OUTLINE_R, OUTLINE_G, OUTLINE_B = 0.6, 0.6, 0.6
+local OUTLINE_ALPHA = 0.3
 local NUM_BUTTONS = ROWS * COLS
 
 local DEFAULTS = {
@@ -70,17 +74,25 @@ local function CreateFrames()
 		buttons[i] = b
 
 		-- Square outline drawn as four 1px edges
+		-- Each edge stops 2px short of the corner, and one pixel set in diagonally
+		-- joins them, giving a slightly rounded corner.
 		local cell = CreateFrame("Frame", nil, outlineLayer)
-		local edges = {}
-		for e = 1, 4 do
+		local function Px()
 			local t = cell:CreateTexture(nil, "OVERLAY")
-			t:SetColorTexture(1, 1, 1, 0.6)
-			edges[e] = t
+			t:SetColorTexture(OUTLINE_R, OUTLINE_G, OUTLINE_B, OUTLINE_ALPHA)
+			return t
 		end
-		edges[1]:SetPoint("TOPLEFT"); edges[1]:SetPoint("TOPRIGHT"); edges[1]:SetHeight(1)
-		edges[2]:SetPoint("BOTTOMLEFT"); edges[2]:SetPoint("BOTTOMRIGHT"); edges[2]:SetHeight(1)
-		edges[3]:SetPoint("TOPLEFT"); edges[3]:SetPoint("BOTTOMLEFT"); edges[3]:SetWidth(1)
-		edges[4]:SetPoint("TOPRIGHT"); edges[4]:SetPoint("BOTTOMRIGHT"); edges[4]:SetWidth(1)
+		local top, bottom, left, right = Px(), Px(), Px(), Px()
+		top:SetPoint("TOPLEFT", 2, 0); top:SetPoint("TOPRIGHT", -2, 0); top:SetHeight(1)
+		bottom:SetPoint("BOTTOMLEFT", 2, 0); bottom:SetPoint("BOTTOMRIGHT", -2, 0); bottom:SetHeight(1)
+		left:SetPoint("TOPLEFT", 0, -2); left:SetPoint("BOTTOMLEFT", 0, 2); left:SetWidth(1)
+		right:SetPoint("TOPRIGHT", 0, -2); right:SetPoint("BOTTOMRIGHT", 0, 2); right:SetWidth(1)
+		for _, c in ipairs({ { "TOPLEFT", 1, -1 }, { "TOPRIGHT", -1, -1 },
+		                     { "BOTTOMLEFT", 1, 1 }, { "BOTTOMRIGHT", -1, 1 } }) do
+			local dot = Px()
+			dot:SetSize(1, 1)
+			dot:SetPoint(c[1], c[2], c[3])
+		end
 		outlines[i] = cell
 	end
 	outlineLayer:SetFrameLevel(buttons[NUM_BUTTONS]:GetFrameLevel() + 5)
