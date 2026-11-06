@@ -1,0 +1,6 @@
+<Bindings>
+	<!-- A CLICK binding "clicks" the secure toggle button on key down AND key up,
+	     which is what lets the grid show on press and hide on release, even in combat. -->
+	<Binding name="CLICK GeistRemakeToggle:LeftButton" header="GEISTREMAKE" category="ADDONS">
+	</Binding>
+</Bindings>

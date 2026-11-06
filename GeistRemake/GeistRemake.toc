@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: GeistRemake
+## Notes: Hold a keybind to pop up a 5x5 grid of action buttons centered on your mouse.
+## Author: JacobPoole
+## Version: 1.0.0
+## SavedVariables: GeistRemakeDB
+
+GeistRemake.lua
