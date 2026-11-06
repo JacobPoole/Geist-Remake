@@ -302,13 +302,18 @@ local function CreateFrames()
 	for i = 1, NUM_BUTTONS do
 		-- Art from ActionButtonTemplate, casting from SecureActionButtonTemplate.
 		-- See "Button updates" above for why this isn't ActionBarButtonTemplate.
+		-- Order matters: the art template brings a flyout OnClick, so the secure
+		-- template must come LAST for its casting OnClick to win (same order
+		-- Blizzard's own action buttons use).
 		local b = CreateFrame("CheckButton", "GeistRemakeButton" .. i, grid,
-			"SecureActionButtonTemplate, ActionButtonTemplate")
+			"ActionButtonTemplate, SecureActionButtonTemplate")
 		b:SetAttribute("type", "action")
 		b:SetAttribute("checkselfcast", true)
 		b:SetAttribute("checkfocuscast", true)
 		b:SetAttribute("checkmouseovercast", true)
-		b:RegisterForClicks("AnyUp")
+		-- Up AND down: with "Cast on key down" on (the default) the secure
+		-- handler only casts on the down half of the click.
+		b:RegisterForClicks("AnyUp", "LeftButtonDown", "RightButtonDown")
 		if b.HotKey then
 			b.HotKey:SetText("")
 			b.HotKey:Hide()
