@@ -48,23 +48,41 @@ local function StripArt(b)
 end
 
 ---------------------------------------------------------------------------
--- Cooldowns
+-- Button updates
 --
--- In combat this client hides cooldown times from addons ("secret values").
--- Blizzard's button code may only pass them to SetCooldown when it runs
--- untainted, and on buttons an addon created it never is, so every cooldown
--- update on the grid threw "Secret values are only allowed during untainted
--- execution". We run Blizzard's handler protected so that can't error, then
--- draw the cooldown ourselves in a way the client allows.
+-- The grid buttons are built from ActionButtonTemplate (art only) plus
+-- SecureActionButtonTemplate (casting), NOT ActionBarButtonTemplate. That
+-- template adds every button to Blizzard's shared action bar event lists,
+-- and an addon button in those lists taints every Blizzard button handled
+-- after it. That taint then spread into Edit Mode and the buff frames
+-- ("Auras cannot be accessed when secret while tainted by 'Geist-Remake'",
+-- e.g. on level up). So the grid listens to events itself and updates only
+-- its own 25 buttons.
+--
+-- In combat the client may hide values from addons ("secret values"), so
+-- anything that might be secret is checked before it is compared or used.
 ---------------------------------------------------------------------------
 
 local function IsSecret(v)
 	return issecretvalue ~= nil and issecretvalue(v)
 end
 
+local function Slot(b)
+	return b:GetAttribute("action")
+end
+
+local GetTexture = (C_ActionBar and C_ActionBar.GetActionTexture) or GetActionTexture
+local HasAction = (C_ActionBar and C_ActionBar.HasAction) or HasAction
+
+local function Call(fn, ...)
+	if not fn then return nil end
+	local ok, a, b, c, d = pcall(fn, ...)
+	if ok then return a, b, c, d end
+end
+
 local function DrawCooldown(b)
 	local cd = b.cooldown
-	local slot = b.action or b:GetAttribute("action")
+	local slot = Slot(b)
 	if not (cd and slot) then return end
 
 	-- Newer clients hand out a "duration object" that can carry hidden times
@@ -96,19 +114,166 @@ local function DrawCooldown(b)
 	end
 end
 
--- Blizzard's event dispatcher calls button:OnEvent for every action bar event.
--- Only our own 25 buttons are changed; the default action bars are untouched.
-local function ProtectCooldowns(b)
-	local original = b.OnEvent
-	if type(original) ~= "function" then return end
-	local function OnEvent(self, event, ...)
-		pcall(original, self, event, ...)
-		DrawCooldown(self)
+local function UpdateCount(b)
+	if not (b.Count and b.Name) then return end
+	local slot = Slot(b)
+	local text = ""
+	if Call(IsConsumableAction, slot) or Call(IsStackableAction, slot) then
+		local count = Call(GetActionCount, slot)
+		if count ~= nil then
+			if IsSecret(count) then
+				pcall(b.Count.SetText, b.Count, count)
+				return
+			end
+			text = count > 9999 and "*" or tostring(count)
+		end
+	else
+		local macroName = Call(GetActionText, slot)
+		if macroName and not IsSecret(macroName) then
+			b.Name:SetText(macroName)
+		end
 	end
-	b.OnEvent = OnEvent
-	if b:GetScript("OnEvent") then
-		b:SetScript("OnEvent", OnEvent)
+	b.Count:SetText(text)
+end
+
+local function UpdateUsable(b)
+	local usable, noMana = Call(IsUsableAction, Slot(b))
+	if IsSecret(usable) or IsSecret(noMana) then return end
+	if usable then
+		b.icon:SetVertexColor(1, 1, 1)
+	elseif noMana then
+		b.icon:SetVertexColor(0.5, 0.5, 1)
+	else
+		b.icon:SetVertexColor(0.4, 0.4, 0.4)
 	end
+end
+
+local function UpdateState(b)
+	local slot = Slot(b)
+	local active = Call(IsCurrentAction, slot)
+	local repeating = Call(IsAutoRepeatAction, slot)
+	if IsSecret(active) or IsSecret(repeating) then return end
+	b:SetChecked(active or repeating or false)
+end
+
+local function UpdateButton(b)
+	local slot = Slot(b)
+	if not slot then return end
+
+	local texture = Call(GetTexture, slot)
+	if IsSecret(texture) then
+		pcall(b.icon.SetTexture, b.icon, texture)
+		b.icon:Show()
+	elseif texture then
+		b.icon:SetTexture(texture)
+		b.icon:Show()
+	else
+		b.icon:Hide()
+	end
+
+	if b.Name then b.Name:SetText("") end
+	if Call(HasAction, slot) then
+		UpdateCount(b)
+		UpdateUsable(b)
+		UpdateState(b)
+		DrawCooldown(b)
+		local equipped = Call(IsEquippedAction, slot)
+		if b.Border then b.Border:SetShown(equipped == true) end
+	else
+		if b.Count then b.Count:SetText("") end
+		b:SetChecked(false)
+		if b.cooldown then b.cooldown:Clear() end
+		if b.Border then b.Border:Hide() end
+	end
+	StripArt(b)
+end
+
+local function UpdateAll()
+	for _, b in ipairs(buttons) do UpdateButton(b) end
+end
+
+local function ForEach(fn)
+	for _, b in ipairs(buttons) do fn(b) end
+end
+
+-- Event -> what to refresh. Our own frame, so nothing Blizzard runs is affected.
+local EVENTS = {
+	PLAYER_ENTERING_WORLD = UpdateAll,
+	ACTIONBAR_SLOT_CHANGED = function(slot)
+		for _, b in ipairs(buttons) do
+			if slot == 0 or slot == nil or slot == Slot(b) then UpdateButton(b) end
+		end
+	end,
+	SPELLS_CHANGED = UpdateAll,
+	LEARNED_SPELL_IN_SKILL_LINE = UpdateAll,
+	UPDATE_MACROS = UpdateAll,
+	UPDATE_SHAPESHIFT_FORM = UpdateAll,
+	PLAYER_LEVEL_UP = UpdateAll,
+	BAG_UPDATE_DELAYED = function() ForEach(UpdateCount) end,
+	SPELL_UPDATE_CHARGES = function() ForEach(UpdateCount) end,
+	UNIT_INVENTORY_CHANGED = function() ForEach(UpdateButton) end,
+	ACTIONBAR_UPDATE_COOLDOWN = function() ForEach(DrawCooldown) end,
+	SPELL_UPDATE_COOLDOWN = function() ForEach(DrawCooldown) end,
+	ACTIONBAR_UPDATE_USABLE = function() ForEach(UpdateUsable) end,
+	ACTION_USABLE_CHANGED = function() ForEach(UpdateUsable) end,
+	SPELL_UPDATE_USABLE = function() ForEach(UpdateUsable) end,
+	PLAYER_TARGET_CHANGED = function() ForEach(UpdateUsable) end,
+	UNIT_POWER_FREQUENT = function() ForEach(UpdateUsable) end,
+	ACTIONBAR_UPDATE_STATE = function() ForEach(UpdateState) end,
+	TRADE_SKILL_SHOW = function() ForEach(UpdateState) end,
+	TRADE_SKILL_CLOSE = function() ForEach(UpdateState) end,
+	PLAYER_ENTER_COMBAT = function() ForEach(UpdateState) end,
+	PLAYER_LEAVE_COMBAT = function() ForEach(UpdateState) end,
+	START_AUTOREPEAT_SPELL = function() ForEach(UpdateState) end,
+	STOP_AUTOREPEAT_SPELL = function() ForEach(UpdateState) end,
+}
+
+local UNIT_EVENTS = { UNIT_INVENTORY_CHANGED = true, UNIT_POWER_FREQUENT = true }
+
+local function RegisterUpdates()
+	local f = CreateFrame("Frame")
+	for event in pairs(EVENTS) do
+		-- Not every event exists on every client; skip the ones that don't.
+		if UNIT_EVENTS[event] then
+			pcall(f.RegisterUnitEvent, f, event, "player")
+		else
+			pcall(f.RegisterEvent, f, event)
+		end
+	end
+	f:SetScript("OnEvent", function(_, event, ...)
+		local handler = EVENTS[event]
+		if handler then handler(...) end
+	end)
+	-- The grid is shown by secure code; refresh it whenever it appears.
+	grid:HookScript("OnShow", UpdateAll)
+end
+
+-- Mouse handling for one grid button: tooltip and drag & drop.
+local function SetupScripts(b)
+	b:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		if GameTooltip:SetAction(Slot(self)) then
+			GameTooltip:Show()
+		else
+			GameTooltip:Hide()
+		end
+	end)
+	b:SetScript("OnLeave", GameTooltip_Hide)
+	b:RegisterForDrag("LeftButton", "RightButton")
+	b:SetScript("OnDragStart", function(self)
+		if InCombat() then return end
+		PickupAction(Slot(self))
+		UpdateButton(self)
+	end)
+	b:SetScript("OnReceiveDrag", function(self)
+		if InCombat() then return end
+		PlaceAction(Slot(self))
+		UpdateButton(self)
+	end)
+	-- A click casts (or places whatever is on the cursor); refresh the checked look.
+	b:HookScript("PostClick", function(self)
+		UpdateState(self)
+	end)
 end
 
 ---------------------------------------------------------------------------
@@ -135,22 +300,25 @@ local function CreateFrames()
 	outlineLayer:EnableMouse(false)
 
 	for i = 1, NUM_BUTTONS do
-		local b = CreateFrame("CheckButton", "GeistRemakeButton" .. i, grid, "ActionBarButtonTemplate")
-		b:SetID(0) -- ID 0 => the button reads its slot from the "action" attribute
+		-- Art from ActionButtonTemplate, casting from SecureActionButtonTemplate.
+		-- See "Button updates" above for why this isn't ActionBarButtonTemplate.
+		local b = CreateFrame("CheckButton", "GeistRemakeButton" .. i, grid,
+			"SecureActionButtonTemplate, ActionButtonTemplate")
+		b:SetAttribute("type", "action")
+		b:SetAttribute("checkselfcast", true)
+		b:SetAttribute("checkfocuscast", true)
+		b:SetAttribute("checkmouseovercast", true)
+		b:RegisterForClicks("AnyUp")
 		if b.HotKey then
 			b.HotKey:SetText("")
 			b.HotKey:Hide()
 		end
-		-- Hide Blizzard's slot fill and border so only our outline shows. Blizzard
-		-- re-applies this art when a button updates, so strip it again after
-		-- every update.
+		-- Hide Blizzard's slot fill and border so only our outline shows.
 		StripArt(b)
-		for _, method in ipairs({ "Update", "UpdateButtonArt", "UpdateAction" }) do
-			if type(b[method]) == "function" then
-				hooksecurefunc(b, method, StripArt)
-			end
+		if type(b.UpdateButtonArt) == "function" then
+			hooksecurefunc(b, "UpdateButtonArt", StripArt)
 		end
-		ProtectCooldowns(b)
+		SetupScripts(b)
 		buttons[i] = b
 
 		-- Square outline drawn as four 1px edges
@@ -236,18 +404,8 @@ local function ApplySettings()
 		o:SetPoint("CENTER", grid, "TOPLEFT", cx, cy)
 
 		b:SetAttribute("action", db.startSlot + i - 1)
-		if b.UpdateAction then
-			b:UpdateAction(true)
-		elseif ActionButton_UpdateAction then
-			ActionButton_UpdateAction(b, true)
-		end
-
-		-- Always show empty slots so spells can be dragged onto them
-		if b.ShowGrid then
-			b:ShowGrid(ACTION_BUTTON_SHOW_GRID_REASON_CVAR or 1)
-		else
-			b:SetAttribute("showgrid", 1)
-		end
+		UpdateButton(b)
+		-- Empty slots stay visible so spells can be dragged onto them
 		b:Show()
 	end
 	return true
@@ -340,6 +498,7 @@ loader:SetScript("OnEvent", function(self, event, name)
 	end
 
 	CreateFrames()
+	RegisterUpdates()
 	if InCombat() then
 		-- e.g. /reload mid-fight: finish setup once combat ends
 		self:RegisterEvent("PLAYER_REGEN_ENABLED")
